@@ -20,11 +20,11 @@ operator == :: (a: Grow_Counter, b: Grow_Counter) -> bool {
     return true;
 }
 
-is_zero :: (using grow_counter: *Grow_Counter) -> bool {
+is_zero :: (using grow_counter: Grow_Counter) -> bool {
     return grow_counter.count == 0;
 }
 
-value :: (using grow_counter: *Grow_Counter) -> int {
+value :: (using grow_counter: Grow_Counter) -> int {
     result := 0;
     for grow_counter {
         replica_id, local_count := it_index, it;
@@ -60,8 +60,35 @@ merge :: (a: Grow_Counter, b: Grow_Counter) -> Grow_Counter {
     return result;
 }
 
-#scope_file
+Counter :: struct {
+    positive: Grow_Counter;
+    negative: Grow_Counter;
+}
 
+zero :: (using counter: Counter) -> bool {
+    return value(positive) + value(negative) == 0;
+}
+
+value :: (using counter: Counter) -> int {
+    return value(positive) - value(negative);
+}
+
+increment :: (using counter: *Counter, replica_id: ReplicaID) {
+    increment(*positive, replica_id);
+}
+
+decrement :: (using counter: *Counter, replica_id: ReplicaID) {
+    increment(*negative, replica_id);
+}
+
+merge :: (a: *Counter, b: *Counter) -> Counter {
+    result: Counter;
+    result.positive = merge(a.positive, b.positive);
+    result.negative = merge(a.negative, b.negative);
+    return result;
+}
+
+#scope_file
 
 fold :: (func: $F, acc: $A, arr: []A) -> A {
     if arr.count == 0
@@ -75,28 +102,57 @@ fold :: (func: $F, acc: $A, arr: []A) -> A {
     return fold(func, new_acc, new_arr);
 }
 
-
-#scope_export
-main :: () {
+test_grow_counter :: () {
     gc: Grow_Counter;
-    assert(is_zero(*gc));
-    assert(value(*gc) == 0);
+    assert(is_zero(gc));
+    assert(value(gc) == 0);
 
     replica_1: ReplicaID = 1001;
     replica_2: ReplicaID = 1002;
 
     increment(*gc, replica_1);
-    assert(!is_zero(*gc));
-    assert(value(*gc) == 1);
+    assert(!is_zero(gc));
+    assert(value(gc) == 1);
 
     increment(*gc, replica_2);
-    assert(value(*gc) == 2);
+    assert(value(gc) == 2);
 
     gc2: Grow_Counter;
     assert(gc2 != gc);
 
     gc3 := merge(gc, gc2);
     assert(gc3 == gc);
+    assert(value(gc3) == 2);
+}
+
+test_counter :: () {
+    replica_1: ReplicaID = 1001;
+    replica_2: ReplicaID = 1002;
+
+    c1: Counter;
+    assert(zero(c1));
+    assert(value(c1) == 0);
+
+    increment(*c1, replica_1);
+    assert(value(c1) == 1);
+
+    increment(*c1, replica_2);
+    assert(value(c1) == 2);
+
+    decrement(*c1, replica_1);
+    assert(value(c1) == 1);
+
+    decrement(*c1, replica_2);
+    decrement(*c1, replica_1);
+    decrement(*c1, replica_2);
+
+    assert(value(c1) == -2);
+}
+
+#scope_export
+main :: () {
+    test_grow_counter();
+    test_counter();
 
     print("OK!\n");
 }
